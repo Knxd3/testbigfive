@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 from django.shortcuts import render, redirect
-import pandas as pd
-import numpy as np
-from .forms import survey
-from .models import userScore
 from django.views.decorators.cache import never_cache
 
+from .forms import survey
+from .models import userScore
 
+
+RESULT_SESSION_KEY = 'latest_result_id'
 SUPPORTED_LANGUAGES = {
     'ro': 'Română',
     'en': 'English',
@@ -194,6 +194,44 @@ DIMENSION_CONTENT = [
     },
 ]
 
+QUESTION_SCORING = {
+    1: ('c', 1),
+    2: ('c', 1),
+    3: ('c', -1),
+    4: ('c', -1),
+    5: ('o', 1),
+    6: ('o', 1),
+    7: ('o', -1),
+    8: ('o', -1),
+    9: ('a', 1),
+    10: ('a', 1),
+    11: ('a', -1),
+    12: ('a', -1),
+    13: ('e', 1),
+    14: ('e', 1),
+    15: ('e', -1),
+    16: ('e', -1),
+    17: ('n', 1),
+    18: ('n', 1),
+    19: ('n', -1),
+    20: ('n', -1),
+}
+
+
+def _calculate_scores(cleaned_data):
+    scores = {'c': 0, 'o': 0, 'a': 0, 'e': 0, 'n': 0}
+    for item_number, (facet, weight) in QUESTION_SCORING.items():
+        value = int(cleaned_data.get(f'item{item_number}', 0))
+        scores[facet] += value * weight
+    return scores
+
+
+def _percentile(all_values, latest_value):
+    if not all_values:
+        return 0
+    higher = sum(1 for value in all_values if latest_value > value)
+    return higher / len(all_values)
+
 
 def _get_language(request):
     lang = (
@@ -224,60 +262,15 @@ def questionnaire(request):
     if request.method == 'POST':
         form = survey(request.POST)
         if form.is_valid():
-            qry_dict = request.POST.dict()
-            new_dict = {}
-            for key, value in qry_dict.items():
-                if key not in ('csrfmiddlewaretoken', 'lang'):
-                    new_dict[key] = list(value)
-
-            raw_ = pd.DataFrame.from_dict(new_dict, orient='index')
-            raw_ = raw_.reset_index()
-            raw_['index_id'] = raw_['index'].str.extract(r'(\d{1,3})\D*$')
-            raw_.columns = ['index', 'value', 'index_id']
-            raw_['index_id'] = raw_['index_id'].astype(int)
-            raw_['value'] = raw_['value'].astype(int)
-            raw_['facet'] = np.where(
-                raw_['index_id'] <= 4,
-                'c',
-                np.where(
-                    raw_['index_id'] <= 8,
-                    'o',
-                    np.where(
-                        raw_['index_id'] <= 12,
-                        'a',
-                        np.where(raw_['index_id'] <= 16, 'e', 'n'),
-                    ),
-                ),
+            scores = _calculate_scores(form.cleaned_data)
+            entry = userScore.objects.create(
+                c=scores['c'],
+                a=scores['a'],
+                e=scores['e'],
+                n=scores['n'],
+                o=scores['o'],
             )
-
-            raw_['value'] = raw_['value'].values * np.array(
-                [1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1]
-            )
-            scores_agg = raw_.groupby(['facet']).agg({'value': 'sum'})
-            scores_f = scores_agg.transpose()
-            scores_f1 = pd.DataFrame(
-                {'c': [None], 'o': [None], 'a': [None], 'e': [None], 'n': [None], 'user': [np.random.rand(1)]}
-            )
-
-            def check(facet_code, frame):
-                if facet_code in frame.columns:
-                    return frame[facet_code].values[0]
-                return None
-
-            scores_f1['c'] = check('c', scores_f)
-            scores_f1['a'] = check('a', scores_f)
-            scores_f1['e'] = check('e', scores_f)
-            scores_f1['n'] = check('n', scores_f)
-            scores_f1['o'] = check('o', scores_f)
-
-            user_entry = userScore(
-                c=scores_f1['c'].values[0],
-                a=scores_f1['a'].values[0],
-                e=scores_f1['e'].values[0],
-                n=scores_f1['n'].values[0],
-                o=scores_f1['o'].values[0],
-            )
-            user_entry.save()
+            request.session[RESULT_SESSION_KEY] = entry.id
 
             return redirect('results')
 
@@ -291,10 +284,12 @@ def questionnaire(request):
 def results(request):
     lang = _get_language(request)
 
-    db_qs = userScore.objects.all().values()
-    db_qs_df = pd.DataFrame.from_records(db_qs)
+    latest_id = request.session.get(RESULT_SESSION_KEY)
+    if not latest_id:
+        return redirect('questionnaire')
 
-    if db_qs_df.empty:
+    all_entries = list(userScore.objects.order_by('id').values('id', 'c', 'a', 'o', 'e', 'n'))
+    if not all_entries:
         context = {
             'dimensions': [],
             'lang': lang,
@@ -303,15 +298,14 @@ def results(request):
         }
         return render(request, 'testbigfive/results.html', context)
 
-    latest_db_q = db_qs_df.loc[db_qs_df['id'] == db_qs_df['id'].max(), :]
-
-    def ptile_calc(all_values, latest_value):
-        return np.sum(latest_value > all_values) / len(all_values)
+    latest_scores = next((entry for entry in all_entries if entry['id'] == latest_id), None)
+    if latest_scores is None:
+        return redirect('questionnaire')
 
     dimensions = []
     for dimension in DIMENSION_CONTENT:
         code = dimension['code']
-        percentile_value = ptile_calc(db_qs_df[code].values, latest_db_q[code].values[0])
+        percentile_value = _percentile([entry[code] for entry in all_entries], latest_scores[code])
         percent_display = int(percentile_value * 100)
         adjective = dimension['adjectives'][lang]
         paragraphs = dimension['paragraphs'][lang]

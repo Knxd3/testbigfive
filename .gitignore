@@ -1,0 +1,28 @@
+# Secrets and dumps
+secret.key
+dbdumps.txt
+datadump.json
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+persproj/
+
+# Local settings and databases
+db.sqlite3
+db.sql
+*.sqlite3
+
+# Static assets collected locally
+staticfiles/
+
+# IDE / editor settings
+.vscode/
+*.code-workspace
+.idea/

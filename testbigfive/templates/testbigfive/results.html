@@ -2,6 +2,7 @@
 <html>
   <head>
     {% load static %}
+    <meta charset="utf-8" />
     <script src="https://cdn.jsdelivr.net/npm/animejs@3.0.1/lib/anime.min.js"></script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
     <link href="https://fonts.googleapis.com/css?family=Poppins:600" rel="stylesheet" />
@@ -53,7 +54,7 @@
         <div class="col-10 panel">
           {% if lang == 'en' %}
             <p class="text-justify">
-              These are your Big Five personality test results. Your score is compared with everyone who has taken this test online. We filter suspicious entries as much as possible. Because the questionnaire runs exclusively online, it reflects people who speak Romanian, have internet access, and show at least some interest in personality tests. This is not a clinical instrument and it is not meant to replace an assessment administered through officially approved Big Five inventories.
+              These are your Big Five personality test results. Your score is compared with everyone who has taken this test online and each percentile shows where your responses fall relative to the overall sample for that trait.
             </p>
           {% else %}
             <p class="text-justify">
